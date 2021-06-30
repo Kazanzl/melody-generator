@@ -13,7 +13,7 @@ class MusicGen:
                 musicfiles.append(file)
         self.random_bgm = random.choice(musicfiles)
         print(self.random_bgm)
-        winsound.PlaySound(f'resources/{self.random_bgm}', winsound.SND_ALIAS | winsound.SND_ASYNC)
+        winsound.PlaySound(f'resources/{self.random_bgm}', winsound.SND_ALIAS | winsound.SND_LOOP + winsound.SND_ASYNC)
 
         self.savefolder = savefolder
 
@@ -108,7 +108,7 @@ class MusicGen:
             self.mutation_probability.set(round(float(value), 1))
     
     def generate(self):
-        tk.messagebox.showinfo('Save Location', 'Choose a location to save relevant files.')
+        tk.messagebox.showinfo('Save Location', 'Choose a location to save relevant files.', parent=self.window)
         self.folder = tk.filedialog.askdirectory()
 
         self.window.lift()
@@ -165,7 +165,7 @@ class MusicGen:
         self.bg_label.lower()
         for widget in self.rating_widgets:
             widget.lower()
-        winsound.PlaySound(f'resources/{self.random_bgm}', winsound.SND_ALIAS | winsound.SND_ASYNC)
+        winsound.PlaySound(f'resources/{self.random_bgm}', winsound.SND_ALIAS | winsound.SND_LOOP + winsound.SND_ASYNC)
     
     def proceed_rating(self):
         self.server.stop()
@@ -181,7 +181,7 @@ class MusicGen:
                 self.musics.save_to_midi(self.folder, first_time_saving=True)
             else:
                 self.musics.save_to_midi(self.savefolder, first_time_saving=False)
-            cont = tk.messagebox.askyesno('Reached Last Melody', 'The session has been successfully saved and can be resumed in the future. Proceed to next generation?')
+            cont = tk.messagebox.askyesno('Reached Last Melody', 'The session has been successfully saved and can be resumed in the future. Proceed to next generation?', parent=self.window)
             if cont:
                 self.perform_ga()
             else:
@@ -189,7 +189,7 @@ class MusicGen:
                 for widget in self.rating_widgets:
                     widget.lower()
                 self.window.lift()
-                winsound.PlaySound(f'resources/{self.random_bgm}', winsound.SND_ALIAS | winsound.SND_ASYNC)
+                winsound.PlaySound(f'resources/{self.random_bgm}', winsound.SND_ALIAS | winsound.SND_LOOP + winsound.SND_ASYNC)
                 return
         else:
             self.musics.population[self.count].start_playing(self.server)

@@ -50,21 +50,23 @@ class Launcher:
             self.music_popup.window.lift(self.root)
     
     def load(self):
-        folder = tk.filedialog.askdirectory()
-        if not folder:
-            return
-        midifiles = os.listdir(folder)
-        if not midifiles:
-            tk.messagebox.showerror('Invalid Directory', 'No files detected.')
-            return
-        for file in midifiles:
-            if not file.endswith('.mid'):
-                tk.messagebox.showerror('Invalid Directory', 'Non-MIDI files detected.')
-                return
-
         if self.music_popup is None or not self.music_popup.window.winfo_exists():
+            folder = tk.filedialog.askdirectory()
+            if not folder:
+                return
+            midifiles = os.listdir(folder)
+            if not midifiles:
+                tk.messagebox.showerror('Invalid Directory', 'No files detected.')
+                return
+            for file in midifiles:
+                if not file.endswith('.mid'):
+                    tk.messagebox.showerror('Invalid Directory', 'Non-MIDI files detected.')
+                    return
+
             self.music_popup = MusicGen(folder)
-    
+        else:
+            self.music_popup.window.lift(self.root)
+            
     def quit(self):
         confirm = tk.messagebox.askyesno('Exiting Launcher', 'Are you sure you want to quit?', icon='info')
         if confirm:
