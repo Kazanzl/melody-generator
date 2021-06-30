@@ -1,29 +1,34 @@
 from __future__ import annotations
-import click, random
+import random, os, json
 from datetime import datetime
 from typing import List, Tuple, NoReturn
-from midiutil import MIDIFile
+from mido import Message, MidiFile, MidiTrack, MetaMessage
+from mido.midifiles.units import bpm2tempo, tempo2bpm
 from pyo import *
-from collections import namedtuple
 from ga import *
 
 SCALE_DEGREES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]  #melody can take 2 octaves of notes, note 15 is rest note
 NOTE_VALUES = [2, 1, 0.5, 0.25] #melody can take 4 different note durations
 KEYS = ["C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb", "B"]
 SCALES = ["major", "minorM", "dorian", "phrygian", "lydian", "mixolydian", "majorBlues", "minorBlues"]
-
-class Music:
-    def __init__(self, scale_degrees: List[int], durations: List[int], key: str, scale: str, octave: str,
-                 time_sign: Tuple[int, int], bpm: int, num_steps: int, generation: int):
-        self.scale_degrees = scale_degrees
+TIME_SIGNS = ['4/4', '3/4', '2/4', '6/8']
+NUM_OF_STEPS = ['1', '2', '3']
+        
+class Melody:
+    def __init__(self, note_degrees: List[int], durations: List[float], key: str, scale: str, octave: str,
+                 time_sign: Tuple[int, int], bpm: int, num_steps: int, pitches: List[int] = None, velocities: List[int] = None):
+        self.note_degrees = note_degrees
         self.durations = durations
-        self.pitches, self.velocities = self.info_from_degrees(scale_degrees, key, scale, octave, num_steps)
 
-        self.scale = EventScale(root=key, scale=scale, first=octave)
-
+        self.key = key
+        self.scale = scale
+        self.octave = octave
         self.time_sign = time_sign
         self.bpm = bpm
-        self.generation = generation
+        self.num_steps = num_steps
+
+        self.pitches = pitches
+        self.velocities = velocities
 
         self.events = []
         #create midi events from each melody line
@@ -31,7 +36,7 @@ class Music:
             self.events.append(
                 Events(
                 midinote=EventSeq(notes, occurrences=1),
-                beat=EventSeq(durations, occurrences=1),
+                beat=EventSeq(self.durations, occurrences=1),
                 midivel=EventSeq(self.velocities, occurrences=1),
                 attack=0.001,
                 decay=0.05,
@@ -40,104 +45,208 @@ class Music:
                 bpm=bpm)
                 )
 
-    #save melody as midi
-    def save_to_midi(self, filename: str) -> NoReturn:
-        mf = MIDIFile(1)
-
-        track = 0
-        channel = 0
-
-        time = 0.0
-        mf.addTrackName(track, time, "Sample Track")
-        mf.addTempo(track, time, self.bpm)
-        mf.addTimeSignature(track, time, self.time_sign[0], int(math.log2(self.time_sign[1])), 24)
-
-        for notes in self.pitches:
-            time = 0
-            for i, note in enumerate(notes):
-                mf.addNote(track, channel, note, time, self.durations[i], self.velocities[i])
-                time += self.durations[i]
-
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, "wb") as f:
-            mf.writeFile(f)
-
-    @classmethod
-    def generate_from_midi(cls, filename: str) -> Music:
-        ...
+    @property
+    def note_degrees(self):
+        return self._note_degrees
     
-    @staticmethod
-    def info_from_degrees(scale_degrees: List[int], key: str, scale: str, octave: int, num_steps: int) -> Tuple[List[int], List[int]]:
-        scl = EventScale(root=key, scale=scale, first=octave)
+    @property
+    def durations(self):
+        return self._durations
 
-        pitches = []
+    @property
+    def pitches(self):
+        return self._pitches
 
-        scale_degrees = [degree%7 for degree in scale_degrees]
-        for step in range(num_steps):
-            pitches.append([scl[(degree + step*2) % (len(scl)-1)] for degree in scale_degrees])
-        
-        vels = [0 if degree == 15 else 60 for degree in scale_degrees]
+    @property
+    def velocities(self):
+        return self._velocities
     
-        return pitches, vels
+    @note_degrees.setter
+    def note_degrees(self, degrees: List[int]):
+        if any(degree < 0 or degree > 15 for degree in degrees):
+            raise ValueError('Note degree out of range (0-15)')
+        self._note_degrees = degrees
+    
+    @durations.setter
+    def durations(self, durs: List[float]):
+        if any(dur not in NOTE_VALUES for dur in durs):
+            raise ValueError('Note durations invalid')
+        self._durations = durs
+    
+    @pitches.setter
+    def pitches(self, pitches: List[int]):
+        if pitches is None:
+            scl = EventScale(root=self.key, scale=self.scale, first=self.octave)
 
-    def rate_fitness(self, s: Server) -> int:
+            pitches = []
+            degrees = [degree%7 for degree in self.note_degrees]
+            for step in range(self.num_steps):
+                pitches.append([scl[(degree + step*2) % (len(scl)-1)] for degree in degrees])
+        else:
+            for pitch in pitches:
+                try:
+                    if any(note < 0 or note > 127 for note in pitch):
+                        raise ValueError('Pitch out of range (0-127)')
+                except IndexError:
+                    raise IndexError('No pitch layers found')
+
+        self._pitches = pitches
+    
+    @velocities.setter
+    def velocities(self, vels: List[int]):
+        if vels is None:
+            vels = [0 if degree == 15 else 100 for degree in self.note_degrees]
+        elif any(vel < 0 or vel > 127 for vel in vels):
+            raise ValueError('Velocity out of range (0-127)')
+        self._velocities = vels
+
+    def start_playing(self, s: Server) -> NoReturn:
         for e in self.events:
             e.play()
         s.start()
 
-        rating = input("rating (0-5)")
-
+    def stop_playing(self) -> NoReturn:
         for e in self.events:
             e.stop()
-        s.stop()
 
-        try:
-            self.rating = int(rating)
-        except ValueError:
-            self.rating = 0
+    def set_rating(self, value: int) -> NoReturn:
+        self.rating = value
 
-        return self.rating
-    
     @staticmethod
     def get_fitness(music):
         return music.rating
 
-def generate_music(time_sign: Tuple[int, int], max_beats: int, chaos: float):
+class Music:
+    def __init__(self, key: str, scale: str, octave: str, time_sign: Tuple[int, int], bpm: int, 
+                 num_steps: int, generation: int, num_mutations: int, mutation_probability: float, population: List[Melody] = []) -> NoReturn:
+        self.key = key
+        self.scale = scale
+        self.octave = octave
+        self.time_sign = time_sign
+        self.bpm = bpm
+        self.num_steps = num_steps
+        self.generation = generation
+        self.num_mutations = num_mutations
+        self.mutation_probability = mutation_probability
+        self.population = population
+    
+    def add_melody(self, note_degrees: List[int], durations: List[float], pitches: List[int] = None, velocities: List[int] = None) -> NoReturn:
+        melody = Melody(note_degrees, durations, self.key, self.scale, self.octave, self.time_sign, self.bpm, self.num_steps, pitches, velocities)
+        self.population.append(melody)
+    
+    def save_to_midi(self, folder: str, first_time_saving: bool) -> NoReturn:
+          
+        for i, melody in enumerate(self.population):
+            midi = MidiFile()
+
+            TICKS = midi.ticks_per_beat
+
+            meta = MidiTrack()
+            midi.tracks.append(meta)
+            meta.append(MetaMessage('time_signature', numerator=self.time_sign[0], denominator=self.time_sign[1]))
+            meta.append(MetaMessage('key_signature', key=self.key))
+            meta.append(MetaMessage('set_tempo', tempo=bpm2tempo(self.bpm)))
+
+            track = MidiTrack()
+            midi.tracks.append(track)
+            for j, notes in enumerate(zip(*melody.pitches)):
+                #set notes on
+                for note in notes:
+                    track.append(Message('note_on', note=note, velocity=melody.velocities[j], time=0))
+                
+                #set notes off
+                for k, note in enumerate(notes):
+                    if k == 0:
+                        track.append(Message('note_off', note=note, velocity=melody.velocities[j], time=int(melody.durations[j]*TICKS)))
+                    track.append(Message('note_off', note=note, velocity=melody.velocities[j], time=0))
+
+            if first_time_saving:
+                metadata = {'scale': self.scale, 'num_steps': self.num_steps, 'generation': self.generation, 'num_mutations': self.num_mutations, 'mutation_probability': self.mutation_probability}
+                with open(f'{folder}/meta.json', 'w') as f:
+                     json.dump(metadata, f, indent=4)
+                os.makedirs(f'{folder}/{self.generation}', exist_ok=True)
+                midi.save(filename=f'{folder}/{self.generation}/{self.key}-{self.scale}-{i}.mid')
+            else:
+                parent_dir = os.path.dirname(folder)
+                os.makedirs(f'{parent_dir}/{self.generation}', exist_ok=True)
+                midi.save(filename=f'{parent_dir}/{self.generation}/{self.key}-{self.scale}-{i}.mid')
+
+    @classmethod
+    def generate_from_folder(cls, folder: str) -> Melody: 
+        
+        rootfolder = os.listdir(os.path.dirname(folder))
+        for filename in rootfolder:
+            if filename.endswith('.json'):
+                data_json = filename
+                break
+        
+        with open(f'{os.path.dirname(folder)}/{data_json}') as f:
+            data = json.load(f)
+
+        scale = data['scale']
+        num_steps = data['num_steps']
+        generation = data['generation']
+        num_mutations = data['num_mutations']
+        mutation_probability = data['mutation_probability']
+        
+        midifilenames = os.listdir(folder)
+        key = bpm = octave = time_sign = None
+        #iterate the whole population of midis
+        for i, filename in enumerate(midifilenames):
+            midi = MidiFile(f'{folder}/{filename}')
+            #retrieve the melody and rhythm from each track (we only use 1 track for this application)
+            for track in midi.tracks:
+                melody = []
+                rhythm = []
+                velocity = []
+                
+                note_on = False # a flag to determine the lowest pitch of each chord if there's a chord (the lowest pitch is the first note of each note_on)
+                for msg in track:
+                    if msg.is_meta:
+                        if msg.type == 'time_signature':
+                            time_sign = (msg.numerator, msg.denominator)
+                        elif msg.type == 'key_signature':
+                            key = msg.key.replace('m', '')
+                        elif msg.type == 'set_tempo':
+                            bpm = tempo2bpm(msg.tempo)
+                    else:
+                        if msg.type == 'note_on':
+                            if not note_on:
+                                note_on = True
+                                melody.append(msg.note)
+                                velocity.append(msg.velocity)
+                            else:
+                                continue
+                        else:
+                            if note_on:
+                                note_on = False
+                                dur = msg.time/midi.ticks_per_beat
+                                rhythm.append(dur)
+            
+            if i == 0:
+                octave = min(melody)//12 
+                music_population = cls(key, scale, octave, time_sign, bpm, num_steps, generation, num_mutations, mutation_probability)
+            
+            scl = EventScale(root=key, scale=scale, first=octave)
+            note_degree = []
+            for pitch, vel in zip(melody, velocity):
+                if vel == 0:
+                    note_degree.append(15)
+                else:
+                    degree = scl.data.index(pitch)
+                    note_degree.append(degree)
+
+            music_population.add_melody(note_degree, rhythm)
+        return music_population
+
+def generate_music(max_beats: int):
     full_melody = []
     full_rhythm = []
     full_duration = 0.0
 
     #generate note values until it occupies all the bars
     while full_duration < max_beats:
-        
-        #takes different weights depending whether on beat or off beat and based on chaos value
-        if full_duration.is_integer():
-            if full_duration + 1 >= 4/time_sign[1] * time_sign[0]:
-                half_note_weight = (1-chaos)/16
-            else:
-                half_note_weight = (1-chaos)/3
-            weights = [half_note_weight, 1-chaos, (1-chaos)/4, chaos/4]
-
-        elif str(full_duration).endswith(('25', '75')):
-            if full_duration + 1 >= 4/time_sign[1] * time_sign[0]:
-                half_note_weight = chaos/16
-                quarter_note_weight = chaos/16 
-                eighth_note_weight = chaos/16
-            else:
-                half_note_weight = chaos/8
-                quarter_note_weight = chaos/4
-                eighth_note_weight = chaos/2
-            weights = [half_note_weight, quarter_note_weight, eighth_note_weight, 1-chaos]
-
-        else:
-            if full_duration + 1 >= 4/time_sign[1] * time_sign[0]:
-                half_note_weight = chaos/16
-                quarter_note_weight = chaos/16
-            else:
-                half_note_weight = chaos/4
-                quarter_note_weight = chaos/2
-            weights = [half_note_weight, quarter_note_weight, 1-chaos, (1-chaos)/2]
-        
+        weights = [0.05, 0.5, 0.4, 0.05]
         while True:
             duration = generate_genomes(NOTE_VALUES, 1, weights)[0]
             if full_duration + duration > max_beats:
@@ -161,88 +270,3 @@ def generate_music(time_sign: Tuple[int, int], max_beats: int, chaos: float):
     full_melody = [0] + full_melody[1:] #make sure first note is root note
 
     return full_melody, full_rhythm
-
-@click.command()
-@click.option("--num-bars", default=8, prompt='Number of bars:', type=int)
-@click.option("--time-sign-numerator", default=4, prompt='Time signature (numerator):', type=int)
-@click.option("--time-sign-denominator", default=4, prompt='Time signature (denominator):', type=int)
-@click.option("--num-steps", default=1, prompt='Number of notes stacked above (1 = single note, >2 = chords):', type=int)
-@click.option("--key", default="C", prompt='Key:', type=click.Choice(KEYS, case_sensitive=False))
-@click.option("--scale", default="major", prompt='Scale:', type=click.Choice(SCALES, case_sensitive=False))
-@click.option("--bpm", default=120, prompt='BPM:', type=int)
-@click.option("--chaos", default=0.2, prompt='Chaos value[0-1](higher value means more chaotic):', type=float)
-@click.option("--octave", default=4, prompt='Start at which octave?:', type=int)
-@click.option("--population-size", default=10, prompt='Population size:', type=int)
-@click.option("--num-mutations", default=2, prompt='Number of mutations:', type=int)
-@click.option("--mutation-probability", default=0.5, prompt='Mutations probability:', type=float)
-def main(num_bars: int, time_sign_numerator: int, time_sign_denominator: int, num_steps: int, key: str, scale: str, chaos: float, octave: int,
-         population_size: int, num_mutations: int, mutation_probability: float, bpm: int):
-
-    
-    folder = str(int(datetime.now().timestamp()))
-    time_sign = (time_sign_numerator, time_sign_denominator)
-    max_beats = num_bars * 4/time_sign[1] * time_sign[0]
-
-    s = Server().boot()
-
-    music_population = []
-
-    population_id = 0
-
-    for _ in range(population_size):
-        melody, rhythm = generate_music(time_sign, max_beats, chaos)
-        
-        music = Music(melody, rhythm, key, scale, octave, time_sign, bpm, num_steps, population_id)
-
-        music_population.append(music)
-
-    while True:
-        #rate and pool
-        pool = []
-        for music in music_population:
-            rating = music.rate_fitness(s)
-            #create pool with scale degrees and durations genomes
-            pool.append([music.scale_degrees, music.durations, rating])
-        
-        print(f"population {population_id} done")
-    
-        print("saving population midi …")
-        for i, music in enumerate(music_population):
-            music.save_to_midi(f"{folder}/{population_id}/{scale}-{key}-{i}.mid")
-        
-        print("done")
-
-        cont = input("continue [y/n]")
-        if cont == 'n':
-            break
-        
-        #elitism
-        elitists = elitist_selection(pool, lambda x: x[2])
-        next_gen = [[note, rhythm] for note, rhythm, _ in elitists]
-
-        crossovers_remaining = (len(music_population) - len(elitists))//2
-        for _ in range(crossovers_remaining):
-            #single point crossover
-            parents = selection_pair(pool, lambda x: x[2])
-            note_parents, rhythm_parents, _ = zip(*parents)
-
-            *note_children, p = single_point_crossover(*note_parents)
-            *rhythm_children, _ = single_point_crossover(*rhythm_parents, cutpoint=p)
-
-            #mutation
-            note_children = [mutate_note(child, num_mutations, mutation_probability) for child in note_children]
-            rhythm_children = [mutate_rhythm(child, num_mutations, mutation_probability) for child in rhythm_children]
-
-            for notes, rhythms in list(zip(note_children, rhythm_children)):
-                notes[0] = 0
-                next_gen.append([notes, rhythms])
-        
-        population_id += 1
-        new_population = []
-        for notes, rhythms in next_gen:
-            new_population.append(Music(notes, rhythms, key, scale, octave, time_sign, bpm, num_steps, population_id))
-
-        music_population = new_population
-    
-if __name__ == '__main__':
-    main()

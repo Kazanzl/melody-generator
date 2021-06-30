@@ -1,4 +1,8 @@
-click==7.1.2
-MIDIUtil==1.2.1
+click
+mido
 pyo
 wxPython
+numpy
+opencv-python
+pillow
+tkVideo
