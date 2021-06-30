@@ -1,5 +1,4 @@
 import tkinter as tk
-from datetime import datetime
 from pyo import *
 from tkvideo import tkvideo
 import winsound, os, random

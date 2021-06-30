@@ -1,6 +1,5 @@
 from __future__ import annotations
 import random, os, json
-from datetime import datetime
 from typing import List, Tuple, NoReturn
 from mido import Message, MidiFile, MidiTrack, MetaMessage
 from mido.midifiles.units import bpm2tempo, tempo2bpm

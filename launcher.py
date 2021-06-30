@@ -1,11 +1,10 @@
 #Import from requirement file to update the pyo and those stuffs
-import os, winsound
-#os.system('python -m pip install -r requirements.txt')
+import os
+os.system('python -m pip install -r requirements.txt')
 import tkinter as tk
 from PIL import ImageTk
 from tkinter import messagebox, filedialog
 from music import MusicGen
-from tkvideo import tkvideo
 
 class Launcher:
     def __init__(self):
@@ -71,4 +70,6 @@ class Launcher:
         if confirm:
             self.root.quit()
 
-Launcher()
+if __name__ == '__main__':
+    Launcher()
+    
